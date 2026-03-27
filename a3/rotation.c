@@ -1,5 +1,6 @@
 #include <math.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #define FRAME_COUNT 72
 #define SCALE 30.0
@@ -11,8 +12,8 @@
 typedef struct {
     /*
     * Stores info about a 2D point. 
-    *   float xc: original x coordinate
-    *   float yc: original y coordinate
+    *   float x: transformed x coordinate
+    *   float y: transformed y coordinate
     */
     float x;
     float y;
@@ -22,9 +23,9 @@ typedef struct {
 typedef struct {
     /*
     * Stores info about a 3D point.
-    *   float xc: original x coordinate
-    *   float yc: original y coordinate
-    *   float zc: original z coordinate
+    *   float x: original x coordinate
+    *   float y: original y coordinate
+    *   float z: original z coordinate
     */
     float x;
     float y;
@@ -43,7 +44,7 @@ typedef struct {
 
 typedef struct {
     /*
-    * Stores info about an object Model, 
+    * Stores info about an object Model 
     */
 
     Vertex *vertices;
@@ -100,7 +101,7 @@ ScreenVertex calculate_position(Vertex pt, float frame) {
 void write_vertex(Model *m, int start, int end, int write_fd, int frame) {
     for (int i = start; i < end; i++) {
         ScreenVertex sv = calculate_position(m->vertices[i], frame);
-        ssize_t write_result = write(write_fd, &sv, sizeof(ScreenVertex);
+        ssize_t write_result = write(write_fd, &sv, sizeof(ScreenVertex));
         if (write_result == -1) {
             perror("write vertex");
             exit(1);
