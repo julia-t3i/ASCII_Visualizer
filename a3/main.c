@@ -6,37 +6,14 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-#define MIN_CHILDREN 3
-#define MAX_CHILDREN 10
-#define TARGET_ITEMS_PER_CHILD 3000
+#include "model.h"
+#include "calcs.h"
+#include "rotation.h"
+#include "brightness.h"
 
-typedef struct {
-    float x;
-    float y;
-    float z;
-} Vertex;
-
-typedef struct {
-    int v1;
-    int v2;
-    int v3;
-} Face;
-
-typedef struct {
-    Vertex *vertices;
-    int num_vertices;
-    int vertex_capacity;
-
-    Face *faces;
-    int num_faces;
-    int face_capacity;
-} Model;
-
-typedef struct {
-    int start;
-    int end;
-} Range;
-
+/*
+* Initializes an empty Model object for the given .obj file.
+*/
 static void init_model(Model *m) {
     if (m == NULL) {
         fprintf(stderr, "Error: init_model received NULL model pointer.\n");
@@ -61,6 +38,9 @@ static void init_model(Model *m) {
     }
 }
 
+/*
+* Helper which adds the given Vertex to the given Model.
+*/
 static void add_vertex(Model *m, float x, float y, float z) {
     Vertex *tmp;
 
@@ -88,6 +68,9 @@ static void add_vertex(Model *m, float x, float y, float z) {
     m->num_vertices++;
 }
 
+/*
+* Helper which adds the given Face to the given Model.
+*/
 static void add_face(Model *m, int a, int b, int c) {
     Face *tmp;
 
@@ -115,6 +98,10 @@ static void add_face(Model *m, int a, int b, int c) {
     m->num_faces++;
 }
 
+/*
+* Parses the line containing a vertex's coordinates into a Vertex object,
+* then adds it to the given Model.
+*/
 static void parse_vertex_line(Model *m, char *line) {
     float x, y, z;
 
@@ -131,7 +118,13 @@ static void parse_vertex_line(Model *m, char *line) {
     }
 }
 
-/* parse_face_line  only accepts 4-edge faces*/
+/* 
+* Parses the line containing a face's edges into a Face object,
+* then adds it to the given Model.
+*
+*   Preconditions:
+*   - parsed lines must represent 4-edge faces
+*/
 static void parse_face_line(Model *m, char *line) {
     int a, b, c, d;
 
@@ -168,6 +161,10 @@ static void parse_face_line(Model *m, char *line) {
     }
 }
 
+/*
+* Initializes and populates a Model object containing all vertices and faces 
+* for a given .obj file.
+*/
 Model *load_obj(const char *filename) {
     FILE *fp;
     Model *m;
@@ -221,6 +218,9 @@ Model *load_obj(const char *filename) {
     return m;
 }
 
+/*
+* Adjusts the children clamp based on defined macros for max & min children.
+*/
 static int clamp(int x, int low, int high) {
     if (x < low) return low;
     if (x > high) return high;
@@ -250,54 +250,26 @@ static Range make_range(int i, int k, int n) {
     return r;
 }
 
-static void choose_child_counts(const Model *m, int *vertex_children, int *face_children) {
-    int total_work;
+static void choose_child_counts(const Model *m, int *num_children) {
     int total_children;
-    int vc = 0;
-    int fc = 0;
 
-    if (m == NULL || vertex_children == NULL || face_children == NULL) {
+    if (m == NULL || num_children == NULL) {
         fprintf(stderr, "Error: choose_child_counts received NULL argument.\n");
         exit(1);
     }
 
-    total_work = m->num_vertices + m->num_faces;
-
-    if (total_work == 0) {
-        *vertex_children = 0;
-        *face_children = 0;
+    if (m->num_faces == 0) {
+        *num_children = 0;
         return;
     }
 
-    total_children = (int)ceil((double)total_work / TARGET_ITEMS_PER_CHILD);
+    total_children = (int)ceil((double)m->num_faces / TARGET_ITEMS_PER_CHILD);
     total_children = clamp(total_children, MIN_CHILDREN, MAX_CHILDREN);
 
-    if (m->num_vertices > 0 && m->num_faces > 0) {
-        vc = (int)round((double)total_children * m->num_vertices / total_work);
-        fc = total_children - vc;
-
-        if (vc == 0) {
-            vc = 1;
-            fc--;
-        }
-        if (fc == 0) {
-            fc = 1;
-            vc--;
-        }
-    } else if (m->num_vertices > 0) {
-        vc = total_children;
-        fc = 0;
-    } else {
-        vc = 0;
-        fc = total_children;
-    }
-
-    *vertex_children = vc;
-    *face_children = fc;
+    *num_children = total_children;
 }
 
 static int workers_in_range(const Model *m) {
-    int total_work;
     int suggested_children;
 
     if (m == NULL) {
@@ -305,19 +277,18 @@ static int workers_in_range(const Model *m) {
         return 0;
     }
 
-    total_work = m->num_vertices + m->num_faces;
-
-    if (total_work < 3) {
+    if (m->num_faces < MIN_CHILDREN) {
         fprintf(stderr,
-                "Error: too little work. The model must contain at least 3 combined vertices/faces.\n");
+                "Error: too few faces. The model must contain at least %d faces.\n",
+                MIN_CHILDREN);
         return 0;
     }
 
-    suggested_children = (int)ceil((double)total_work / TARGET_ITEMS_PER_CHILD);
+    suggested_children = (int)ceil((double)m->num_faces / TARGET_ITEMS_PER_CHILD);
 
     if (suggested_children > MAX_CHILDREN) {
         fprintf(stderr,
-                "Error: too much work. This model would require more than %d children.\n",
+                "Error: too many faces. This model would require more than %d children.\n",
                 MAX_CHILDREN);
         return 0;
     }
@@ -325,13 +296,54 @@ static int workers_in_range(const Model *m) {
     return 1;
 }
 
+/*
+* Helper which clears the screen, inserts all returned ScreenVertex into the given screen buffer,
+* and prints to stdout.
+*/
+void compose_display(char screen[HEIGHT][WIDTH], int (*pipes)[2], pid_t *pids, int num_children) {
+    memset(screen, ' ', HEIGHT * WIDTH);
+    
+    for (int i = 0; i < num_children; i++) {
+        ScreenVertex v;
+        while (read(pipes[i][0], &v, sizeof(ScreenVertex)) > 0) {
+            int col = (int)v.x;
+            int row = (int)v.y;
+            if (col >= 0 && col < WIDTH && row >= 0 && row < HEIGHT) {
+                screen[row][col] = v.c;
+            }
+        }
+    }
 
-void spawn_workers(const Model *m) {
-    int vertex_children, face_children;
-    int total_children;
+    /* close parent read ends */
+    for (int i = 0; i < num_children; i++) {
+        if (close(pipes[i][0]) == -1) {
+            perror("close");
+        }
+    }
+
+    /* parent waits for all children */
+    for (int i = 0; i < num_children; i++) {
+        if (waitpid(pids[i], NULL, 0) == -1) {
+            perror("waitpid");
+        }
+    }
+
+    /* print to screen */
+    for (int row = 0; row < HEIGHT; row++) {
+        for (int col = 0; col < WIDTH; col++) {
+            putchar(screen[row][col]);
+        }
+        putchar('\n');
+    }
+}
+
+/*
+* Spawns child processes to process face vertices
+*/
+void spawn_workers(const Model *m, int frame) {
+    int num_children;
     int pipes[MAX_CHILDREN][2];
     pid_t pids[MAX_CHILDREN];
-    int child_index = 0;
 
     if (m == NULL) {
         fprintf(stderr, "Error: spawn_workers received NULL model pointer.\n");
@@ -342,116 +354,54 @@ void spawn_workers(const Model *m) {
         return;
     }
 
-    choose_child_counts(m, &vertex_children, &face_children);
-    total_children = vertex_children + face_children;
+    choose_child_counts(m, &num_children);
+    printf("Child processes: %d\n", num_children);
 
-    /* mainly for debugging*/
-    printf("Vertex children: %d\n", vertex_children);
-    printf("Face children: %d\n", face_children);
-    printf("Total children: %d\n", total_children);
-
-    if (total_children == 0) {
+    if (num_children == 0) {
         return;
     }
 
-    /* spawn vertex children */
-    for (int i = 0; i < vertex_children; i++) {
-        Range r = make_range(i, vertex_children, m->num_vertices);
+    /* spawn child processes */
+    for (int i = 0; i < num_children; i++) {
+        Range r = make_range(i, num_children, m->num_faces);
 
-        if (pipe(pipes[child_index]) == -1) {
+        if (pipe(pipes[i]) == -1) {
             perror("pipe");
             exit(1);
         }
 
-        pids[child_index] = fork();
-        if (pids[child_index] < 0) {
+        pids[i] = fork();
+        if (pids[i] < 0) {
             perror("fork");
-            close(pipes[child_index][0]);
-            close(pipes[child_index][1]);
+            close(pipes[i][0]);
+            close(pipes[i][1]);
             exit(1);
         }
 
-        if (pids[child_index] == 0) {
-            if (close(pipes[child_index][0]) == -1) {
+        if (pids[i] == 0) {
+            if (close(pipes[i][0]) == -1) {
                 perror("close");
                 _exit(1);
             }
 
-            /* TODO: call vertex function here */
+            write_screen_vertices((Model *)m, r.start, r.end, pipes[i][1], frame);
 
-
-            if (close(pipes[child_index][1]) == -1) {
+            if (close(pipes[i][1]) == -1) {
                 perror("close");
                 _exit(1);
             }
             _exit(0);
         }
 
-        if (close(pipes[child_index][1]) == -1) {
+        if (close(pipes[i][1]) == -1) {
             perror("close");
             exit(1);
         }
-
-        child_index++;
     }
 
-    /* spawn face children */
-    for (int i = 0; i < face_children; i++) {
-        Range r = make_range(i, face_children, m->num_faces);
-
-        if (pipe(pipes[child_index]) == -1) {
-            perror("pipe");
-            exit(1);
-        }
-
-        pids[child_index] = fork();
-        if (pids[child_index] < 0) {
-            perror("fork");
-            close(pipes[child_index][0]);
-            close(pipes[child_index][1]);
-            exit(1);
-        }
-
-        if (pids[child_index] == 0) {
-            if (close(pipes[child_index][0]) == -1) {
-                perror("close");
-                _exit(1);
-            }
-
-            /* TODO: call face function here */
-
-
-            if (close(pipes[child_index][1]) == -1) {
-                perror("close");
-                _exit(1);
-            }
-            _exit(0);
-        }
-
-        if (close(pipes[child_index][1]) == -1) {
-            perror("close");
-            exit(1);
-        }
-
-        child_index++;
-    }
-
-    /* TODO: parent reads child results here */
-
-
-    /* close parent read ends after result handling is implemented */
-    for (int i = 0; i < total_children; i++) {
-        if (close(pipes[i][0]) == -1) {
-            perror("close");
-        }
-    }
-
-    /* parent waits for all children */
-    for (int i = 0; i < total_children; i++) {
-        if (waitpid(pids[i], NULL, 0) == -1) {
-            perror("waitpid");
-        }
-    }
+    // print to screen
+    char screen[HEIGHT][WIDTH];
+    compose_display(screen, pipes, pids, num_children);
 }
 
 void free_model(Model *m) {
@@ -464,6 +414,7 @@ void free_model(Model *m) {
     free(m);
 }
 
+// ==============================================================
 
 int main(void) {
     Model *m = load_obj("../boat.obj");
@@ -490,7 +441,12 @@ int main(void) {
                m->faces[i].v3);
     }
 
-    spawn_workers(m);
+    //print each frame
+    for (int frame = 0; frame < FRAME_COUNT; frame++) {
+        printf("\033[H\033[J");  // using ASCII escape character to clear screen
+        spawn_workers(m, frame);
+        usleep(FRAME_RATE);           
+    }
     free_model(m);
 
     return 0;
