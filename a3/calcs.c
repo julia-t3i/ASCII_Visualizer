@@ -1,6 +1,7 @@
 #include <math.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "model.h"
 #include "rotation.h"
