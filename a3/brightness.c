@@ -1,12 +1,13 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <math.h>
+
+#include "model.h"
 #include "brightness.h"
 
 // characters ordered dark → bright
 static const char *ASCII_CHARS = " .:-=+*#@";
 static const int ASCII_CHARS_LEN = 9;  // strlen of ASCII_CHARS
-
 
 /*
 * Computes the brightness of a face based on its angle relative to the light
@@ -49,7 +50,6 @@ float face_brightness(const Model *m, const Face *f) {
     return brightness;
 }
 
-
 /*
 * Maps a brightness value to an ASCII character representing that brightness.
 * Uses a ramp of characters ordered from dark to bright.
@@ -71,23 +71,23 @@ char brightness_to_char(float b) {
 }
 
 
-/*
-* Computes the brightness of each face in the given range [start, end) and writes
-* the corresponding ASCII character to the pipe.
-*
-*   m: the model containing the face and vertex data
-*   start: the start index of faces to process
-*   end: the end index of faces to process (exclusive)
-*   write_fd: the file descriptor to write ASCII characters to
-*
-*/
-void write_ascii(const Model *m, int start, int end, int write_fd) {
-    for (int i = start; i < end; i++) {
-        float brightness = face_brightness(m, &m->faces[i]);
-        char c = brightness_to_char(brightness);
-        if (write(write_fd, &c, sizeof(char)) == -1) {
-            perror("write ASCII character to pipe");
-            exit(1);
-        } 
-    }
-}
+// /*
+// * Computes the brightness of each face in the given range [start, end) and writes
+// * the corresponding ASCII character to the pipe.
+// *
+// *   m: the model containing the face and vertex data
+// *   start: the start index of faces to process
+// *   end: the end index of faces to process (exclusive)
+// *   write_fd: the file descriptor to write ASCII characters to
+// *
+// */
+// void write_ascii(const Model *m, int start, int end, int write_fd, int frame) {
+//     for (int i = start; i < end; i++) {
+//         float brightness = face_brightness(m, &m->faces[i]);
+//         char c = brightness_to_char(brightness);
+//         if (write(write_fd, &c, sizeof(char)) == -1) {
+//             perror("write ASCII character to pipe");
+//             exit(1);
+//         } 
+//     }
+// }
