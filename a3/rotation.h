@@ -3,7 +3,7 @@
 
 #include "model.h"
 
-#define SCALE 35.0
+#define SCALE 45.0
 #define DIST  5.0
 #define WIDTH  80
 #define HEIGHT 40
