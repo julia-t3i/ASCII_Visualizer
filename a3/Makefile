@@ -1,4 +1,4 @@
-FLAGS = -Wall -g
+FLAGS = -Wall -Wextra -g
 LIBS = -lm
 
 # Headers
