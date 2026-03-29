@@ -496,6 +496,9 @@ int main(int argc, char *argv[]) {
     snprintf(path, sizeof(path), "../%s.obj", input);
 
     Model *m = load_obj(path);
+    if (m == NULL) {
+        return 1;
+    }
 
     normalize_model(m);
 
