@@ -133,6 +133,24 @@ static void parse_face_line(Model *m, char *line) {
         exit(1);
     }
 
+    // try triangles first
+    if (sscanf(line, "f %d/%*d/%*d %d/%*d/%*d %d/%*d/%*d", &a, &b, &c) == 3) {
+        add_face(m, a - 1, b - 1, c - 1);
+        return;
+    }
+    if (sscanf(line, "f %d//%*d %d//%*d %d//%*d", &a, &b, &c) == 3) {
+        add_face(m, a - 1, b - 1, c - 1);
+        return;
+    }
+    if (sscanf(line, "f %d/%*d %d/%*d %d/%*d", &a, &b, &c) == 3) {
+        add_face(m, a - 1, b - 1, c - 1);
+        return;
+    }
+    if (sscanf(line, "f %d %d %d", &a, &b, &c) == 3) {
+        add_face(m, a - 1, b - 1, c - 1);
+        return;
+    }
+
     if (sscanf(line, "f %d/%*d/%*d %d/%*d/%*d %d/%*d/%*d %d/%*d/%*d",
                &a, &b, &c, &d) == 4) {
         add_face(m, a - 1, b - 1, c - 1);
@@ -439,6 +457,28 @@ int main(void) {
                m->faces[i].v1,
                m->faces[i].v2,
                m->faces[i].v3);
+    }
+
+    // center the model
+    float minx = INFINITY, maxx = -INFINITY;
+    float miny = INFINITY, maxy = -INFINITY;
+    float minz = INFINITY, maxz = -INFINITY;
+    for (int i = 0; i < m->num_vertices; i++) {
+        Vertex v = m->vertices[i];
+        minx = fmin(minx, v.x);
+        maxx = fmax(maxx, v.x);
+        miny = fmin(miny, v.y);
+        maxy = fmax(maxy, v.y);
+        minz = fmin(minz, v.z);
+        maxz = fmax(maxz, v.z);
+    }
+    float cx = (minx + maxx) / 2.0f;
+    float cy = (miny + maxy) / 2.0f;
+    float cz = (minz + maxz) / 2.0f;
+    for (int i = 0; i < m->num_vertices; i++) {
+        m->vertices[i].x -= cx;
+        m->vertices[i].y -= cy;
+        m->vertices[i].z -= cz;
     }
 
     //print each frame
