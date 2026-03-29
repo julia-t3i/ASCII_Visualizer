@@ -6,8 +6,8 @@
 #include "brightness.h"
 
 // characters ordered dark → bright
-static const char *ASCII_CHARS = " .:-=+*#@";
-static const int ASCII_CHARS_LEN = 9;  // strlen of ASCII_CHARS
+static const char *ASCII_CHARS = ".:-=+*#@";
+static const int ASCII_CHARS_LEN = 8;  // strlen of ASCII_CHARS
 
 /*
 * Computes the brightness of a face based on its angle relative to the light
