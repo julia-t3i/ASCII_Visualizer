@@ -4,7 +4,7 @@
 #include "model.h"
 
 #define SCALE 30.0
-#define DIST  5.0
+#define DIST  10.0
 #define WIDTH  80
 #define HEIGHT 40
 #define ROTATION_ANGLE ((2 * 3.14) / FRAME_COUNT)
