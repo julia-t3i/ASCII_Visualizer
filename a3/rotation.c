@@ -13,7 +13,7 @@ ScreenVertex vertex_projection(float x, float y, float z) {
     ScreenVertex sv;
     
     sv.x = (x / (z + DIST)) * SCALE + WIDTH / 2;
-    sv.y = (y / (z + DIST)) * SCALE + HEIGHT / 2;
+    sv.y = HEIGHT / 2 - (y / (z + DIST)) * SCALE;
 
     return sv;
 }
