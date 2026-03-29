@@ -432,13 +432,66 @@ void free_model(Model *m) {
     free(m);
 }
 
+void normalize_model(Model *m) {
+    if (m == NULL || m->num_vertices == 0) {
+        return;
+    }
+
+
+    float min_x = m->vertices[0].x, max_x = m->vertices[0].x;
+    float min_y = m->vertices[0].y, max_y = m->vertices[0].y;
+    float min_z = m->vertices[0].z, max_z = m->vertices[0].z;
+
+
+    for (int i = 1; i < m->num_vertices; i++) {
+        if (m->vertices[i].x < min_x) min_x = m->vertices[i].x;
+        if (m->vertices[i].x > max_x) max_x = m->vertices[i].x;
+        if (m->vertices[i].y < min_y) min_y = m->vertices[i].y;
+        if (m->vertices[i].y > max_y) max_y = m->vertices[i].y;
+        if (m->vertices[i].z < min_z) min_z = m->vertices[i].z;
+        if (m->vertices[i].z > max_z) max_z = m->vertices[i].z;
+    }
+
+
+    float center_x = (min_x + max_x) / 2.0f;
+    float center_y = (min_y + max_y) / 2.0f;
+    float center_z = (min_z + max_z) / 2.0f;
+
+
+    float size_x = max_x - min_x;
+    float size_y = max_y - min_y;
+    float size_z = max_z - min_z;
+
+
+    float max_dim = size_x;
+    if (size_y > max_dim) max_dim = size_y;
+    if (size_z > max_dim) max_dim = size_z;
+
+
+    if (max_dim == 0.0f) {
+        return;
+    }
+
+
+    float target_size = 4.0f;
+
+
+    for (int i = 0; i < m->num_vertices; i++) {
+        m->vertices[i].x = ((m->vertices[i].x - center_x) / max_dim) * target_size;
+        m->vertices[i].y = ((m->vertices[i].y - center_y) / max_dim) * target_size;
+        m->vertices[i].z = ((m->vertices[i].z - center_z) / max_dim) * target_size;
+    }
+}
+
 // ==============================================================
 
 int main(void) {
-    Model *m = load_obj("../fish.obj");
+    Model *m = load_obj("../glasses.obj");
     if (m == NULL) {
         return 1;
     }
+
+    normalize_model(m);
 
     printf("Vertices: %d\n", m->num_vertices);
     printf("Faces: %d\n", m->num_faces);
