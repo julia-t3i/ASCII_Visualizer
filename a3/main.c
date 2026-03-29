@@ -5,6 +5,7 @@
 #include <math.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <limits.h>
 
 #include "model.h"
 #include "calcs.h"
@@ -485,9 +486,19 @@ void normalize_model(Model *m) {
 
 // ==============================================================
 
-int main(void) {
-    Model *m = load_obj("../glasses.obj");
+int main(int argc, char *argv[]) {
+    const char *input = "fish";  // default 
+    
+    if (argc >= 2 && argv[1] != NULL && argv[1][0] != '\0') {
+        input = argv[1];
+    }
+
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "../%s.obj", input);
+
+    Model *m = load_obj(path);
     if (m == NULL) {
+        fprintf(stderr, "Error: OBJ file '%s' does not exist\n", path);
         return 1;
     }
 
