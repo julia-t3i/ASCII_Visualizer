@@ -488,7 +488,6 @@ void normalize_model(Model *m) {
 
 int main(int argc, char *argv[]) {
     const char *input = "fish";  // default 
-    
     if (argc >= 2 && argv[1] != NULL && argv[1][0] != '\0') {
         input = argv[1];
     }
@@ -497,10 +496,6 @@ int main(int argc, char *argv[]) {
     snprintf(path, sizeof(path), "../%s.obj", input);
 
     Model *m = load_obj(path);
-    if (m == NULL) {
-        fprintf(stderr, "Error: OBJ file '%s' does not exist\n", path);
-        return 1;
-    }
 
     normalize_model(m);
 
