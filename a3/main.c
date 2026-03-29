@@ -417,7 +417,7 @@ void free_model(Model *m) {
 // ==============================================================
 
 int main(void) {
-    Model *m = load_obj("../egg.obj");
+    Model *m = load_obj("../fish.obj");
     if (m == NULL) {
         return 1;
     }
