@@ -400,6 +400,7 @@ void spawn_workers(const Model *m, int frame) {
         if (pids[i] == 0) {
             if (close(pipes[i][0]) == -1) {
                 perror("close");
+                free_model((Model *)m);
                 _exit(1);
             }
 
@@ -407,8 +408,11 @@ void spawn_workers(const Model *m, int frame) {
 
             if (close(pipes[i][1]) == -1) {
                 perror("close");
+                free_model((Model *)m);
                 _exit(1);
             }
+            
+            free_model((Model *)m);
             _exit(0);
         }
 
