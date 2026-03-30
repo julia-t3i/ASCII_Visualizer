@@ -22,7 +22,7 @@ static void draw_line(ScreenVertex a, ScreenVertex b, char c, int write_fd) {
     while (1) {
         // write this pixel
         if (x0 >= 0 && x0 < WIDTH && y0 >= 0 && y0 < HEIGHT) {
-            ScreenVertex sv;
+            ScreenVertex sv = {0};
             sv.x = x0;
             sv.y = y0;
             sv.c = c;
