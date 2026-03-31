@@ -64,12 +64,25 @@ typedef struct {
 } Range;
 
 typedef struct {
+    /*
+    * Contains info about the task being executed.
+    * - frame: the frame for which is being calculated
+    * - start: the first face index to be processed for this taskk
+    * - end: the last face index to be processed for this task
+    */
     int frame;
     int start;
     int end;
 } TaskMsg;
 
 typedef struct {
+    /*
+    * Contains info about a single child worker, which only exists in the parent.
+    * - pid: the child's pid
+    * - to_fd: the fd which the parent process writes info to
+    * - from_fd: the fc which the child process writes info to
+    * - busy: the child's status, 1 = busy, 0 = free
+    */
     pid_t pid;
     int to_fd;
     int from_fd;
@@ -77,6 +90,11 @@ typedef struct {
 } Worker;
 
 typedef struct {
+    /*
+    * Contains info about whether a child process is done, 
+    * since parents need to ensure this before reading computed data.
+    * - done: 1 = child computations are complete
+    */
     int done;
 } EndMsg;
 
