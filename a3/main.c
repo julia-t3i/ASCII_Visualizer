@@ -5,6 +5,9 @@
 #include <math.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <errno.h>
 #include <limits.h>
 
 #include "model.h"
@@ -246,29 +249,6 @@ static int clamp(int x, int low, int high) {
     return x;
 }
 
-static Range make_range(int i, int k, int n) {
-    Range r;
-
-    if (k <= 0) {
-        fprintf(stderr, "Error: make_range received invalid k = %d.\n", k);
-        exit(1);
-    }
-
-    if (i < 0 || i >= k) {
-        fprintf(stderr, "Error: make_range received invalid i = %d for k = %d.\n", i, k);
-        exit(1);
-    }
-
-    if (n < 0) {
-        fprintf(stderr, "Error: make_range received negative n = %d.\n", n);
-        exit(1);
-    }
-
-    r.start = (i * n) / k;
-    r.end = ((i + 1) * n) / k;
-    return r;
-}
-
 static void choose_child_counts(const Model *m, int *num_children) {
     int total_children;
 
@@ -286,6 +266,161 @@ static void choose_child_counts(const Model *m, int *num_children) {
     total_children = clamp(total_children, MIN_CHILDREN, MAX_CHILDREN);
 
     *num_children = total_children;
+}
+
+static void init_workers(const Model *m, Worker *workers, int *num_workers) {
+    if (m == NULL || workers == NULL || num_workers == NULL) {
+        fprintf(stderr, "Error: init_workers received NULL argument.\n");
+        exit(1);
+    }
+
+    choose_child_counts(m, num_workers);
+    if (*num_workers == 0) {
+        fprintf(stderr, "Error: no workers configured.\n");
+        exit(1);
+    }
+
+    printf("Worker processes: %d\n", *num_workers);
+
+    for (int i = 0; i < *num_workers; i++) {
+        int control_pipe[2];
+        int result_pipe[2];
+
+        if (pipe(control_pipe) == -1) {
+            perror("pipe control");
+            exit(1);
+        }
+        if (pipe(result_pipe) == -1) {
+            perror("pipe result");
+            exit(1);
+        }
+
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            exit(1);
+        }
+
+        if (pid == 0) {
+            // child
+            close(control_pipe[1]);
+            close(result_pipe[0]);
+
+            while (1) {
+                TaskMsg task;
+                ssize_t got = read(control_pipe[0], &task, sizeof(TaskMsg));
+                if (got <= 0) {
+                    break;
+                }
+                if (got != sizeof(TaskMsg)) {
+                    continue;
+                }
+
+                write_screen_vertices(m, task.start, task.end, result_pipe[1], task.frame);
+
+                EndMsg end_msg = { .done = 1 };
+                if (write(result_pipe[1], &end_msg, sizeof(EndMsg)) != sizeof(EndMsg)) {
+                    perror("write end");
+                    break;
+                }
+            }
+
+            close(control_pipe[0]);
+            close(result_pipe[1]);
+            free_model((Model *)m);
+            _exit(0);
+        }
+
+        // parent
+        close(control_pipe[0]);
+        close(result_pipe[1]);
+
+        workers[i].pid = pid;
+        workers[i].to_fd = control_pipe[1];
+        workers[i].from_fd = result_pipe[0];
+        workers[i].busy = 0;
+    }
+}
+
+static void cleanup_workers(Worker *workers, int num_workers) {
+    for (int i = 0; i < num_workers; i++) {
+        if (workers[i].to_fd >= 0) close(workers[i].to_fd);
+        if (workers[i].from_fd >= 0) close(workers[i].from_fd);
+    }
+
+    for (int i = 0; i < num_workers; i++) {
+        if (waitpid(workers[i].pid, NULL, 0) == -1) {
+            perror("waitpid");
+        }
+    }
+}
+
+static void send_task_to_worker(Worker *worker, TaskMsg *task) {
+    if (write(worker->to_fd, task, sizeof(TaskMsg)) != sizeof(TaskMsg)) {
+        perror("write task");
+        exit(1);
+    }
+    worker->busy = 1;
+}
+
+static void fill_screen(Worker *worker, char screen[HEIGHT][WIDTH], int *tasks_done, int *next_task, int total_tasks, TaskMsg *tasks) {
+    while (1) {
+        ScreenVertex vertex;
+        ssize_t got = read(worker->from_fd, &vertex, sizeof(ScreenVertex));
+
+        if (got == 0) {
+            worker->busy = 0;
+            return;
+        }
+
+        if (got == sizeof(ScreenVertex)) {
+            int col = (int)vertex.x;
+            int row = (int)vertex.y;
+            if (col >= 0 && col < WIDTH && row >= 0 && row < HEIGHT) {
+                screen[row][col] = vertex.c;
+            }
+            continue;
+        }
+
+        if (got == sizeof(EndMsg)) {
+            EndMsg end;
+            memcpy(&end, &vertex, sizeof(EndMsg));
+            if (end.done == 1) {
+                worker->busy = 0;
+                (*tasks_done)++;
+                if (*next_task < total_tasks) {
+                    send_task_to_worker(worker, &tasks[*next_task]);
+                    (*next_task)++;
+                }
+            }
+            return;
+        }
+
+        if (got > 0 && got < (ssize_t)sizeof(ScreenVertex)) {
+            if (got == sizeof(EndMsg)) {
+                EndMsg end;
+                memcpy(&end, &vertex, sizeof(EndMsg));
+                if (end.done == 1) {
+                    worker->busy = 0;
+                    (*tasks_done)++;
+                    if (*next_task < total_tasks) {
+                        send_task_to_worker(worker, &tasks[*next_task]);
+                        (*next_task)++;
+                    }
+                }
+                return;
+            }
+            continue;
+        }
+
+        if (got < 0) {
+            perror("read from worker");
+            worker->busy = 0;
+            return;
+        }
+
+        return;
+    }
 }
 
 static int workers_in_range(const Model *m) {
@@ -359,11 +494,7 @@ void compose_display(char screen[HEIGHT][WIDTH], int (*pipes)[2], pid_t *pids, i
 /*
 * Spawns child processes to process face vertices
 */
-void spawn_workers(const Model *m, int frame) {
-    int num_children;
-    int pipes[MAX_CHILDREN][2];
-    pid_t pids[MAX_CHILDREN];
-
+void spawn_workers(const Model *m) {
     if (m == NULL) {
         fprintf(stderr, "Error: spawn_workers received NULL model pointer.\n");
         return;
@@ -373,58 +504,86 @@ void spawn_workers(const Model *m, int frame) {
         return;
     }
 
-    choose_child_counts(m, &num_children);
-    printf("Child processes: %d\n", num_children);
+    Worker workers[MAX_CHILDREN];
+    int num_workers = 0;
+    init_workers(m, workers, &num_workers);
 
-    if (num_children == 0) {
+    int total_tasks = (m->num_faces + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    TaskMsg *task_list = malloc(sizeof(TaskMsg) * total_tasks);
+    if (task_list == NULL) {
+        perror("malloc task_list");
+        cleanup_workers(workers, num_workers);
         return;
     }
 
-    /* spawn child processes */
-    for (int i = 0; i < num_children; i++) {
-        Range r = make_range(i, num_children, m->num_faces);
-
-        if (pipe(pipes[i]) == -1) {
-            perror("pipe");
-            exit(1);
-        }
-
-        pids[i] = fork();
-        if (pids[i] < 0) {
-            perror("fork");
-            close(pipes[i][0]);
-            close(pipes[i][1]);
-            exit(1);
-        }
-
-        if (pids[i] == 0) {
-            if (close(pipes[i][0]) == -1) {
-                perror("close");
-                free_model((Model *)m);
-                _exit(1);
-            }
-
-            write_screen_vertices((Model *)m, r.start, r.end, pipes[i][1], frame);
-
-            if (close(pipes[i][1]) == -1) {
-                perror("close");
-                free_model((Model *)m);
-                _exit(1);
-            }
-            
-            free_model((Model *)m);
-            _exit(0);
-        }
-
-        if (close(pipes[i][1]) == -1) {
-            perror("close");
-            exit(1);
+    for (int i = 0; i < total_tasks; i++) {
+        task_list[i].frame = 0;
+        task_list[i].start = i * CHUNK_SIZE;
+        task_list[i].end = (i + 1) * CHUNK_SIZE;
+        if (task_list[i].end > m->num_faces) {
+            task_list[i].end = m->num_faces;
         }
     }
 
-    // print to screen
-    char screen[HEIGHT][WIDTH];
-    compose_display(screen, pipes, pids, num_children);
+    for (int frame = 0; frame < FRAME_COUNT; frame++) {
+        char screen[HEIGHT][WIDTH];
+        memset(screen, ' ', sizeof(screen));
+
+        int next_task = 0;
+        int tasks_done = 0;
+
+        for (int i = 0; i < num_workers && next_task < total_tasks; i++) {
+            task_list[next_task].frame = frame;
+            send_task_to_worker(&workers[i], &task_list[next_task]);
+            next_task++;
+        }
+
+        while (tasks_done < total_tasks) {
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            int max_fd = -1;
+
+            for (int i = 0; i < num_workers; i++) {
+                if (workers[i].from_fd >= 0) {
+                    FD_SET(workers[i].from_fd, &read_fds);
+                    if (workers[i].from_fd > max_fd) {
+                        max_fd = workers[i].from_fd;
+                    }
+                }
+            }
+
+            if (max_fd < 0) {
+                break;
+            }
+
+            int ready = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+            if (ready == -1) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                perror("select");
+                break;
+            }
+
+            for (int i = 0; i < num_workers; i++) {
+                if (workers[i].from_fd >= 0 && FD_ISSET(workers[i].from_fd, &read_fds)) {
+                    fill_screen(&workers[i], screen, &tasks_done, &next_task, total_tasks, task_list);
+                }
+            }
+        }
+
+        for (int row = 0; row < HEIGHT; row++) {
+            for (int col = 0; col < WIDTH; col++) {
+                putchar(screen[row][col]);
+            }
+            putchar('\n');
+        }
+
+        usleep(FRAME_RATE);
+    }
+
+    free(task_list);
+    cleanup_workers(workers, num_workers);
 }
 
 void free_model(Model *m) {
@@ -547,13 +706,7 @@ int main(int argc, char *argv[]) {
         m->vertices[i].z -= cz;
     }
 
-    //print each frame
-    for (int frame = 0; frame < FRAME_COUNT; frame++) {
-        printf("\033[H\033[J");  // using ASCII escape character to clear screen
-        spawn_workers(m, frame);
-        usleep(FRAME_RATE);           
-    }
+    spawn_workers(m);
     free_model(m);
-
     return 0;
 }

@@ -2,10 +2,11 @@
 #define MODEL_H
 
 #define MIN_CHILDREN 3
-#define MAX_CHILDREN 10
+#define MAX_CHILDREN 70
 #define TARGET_ITEMS_PER_CHILD 3000
 #define FRAME_COUNT 72
 #define FRAME_RATE 50000
+#define CHUNK_SIZE 1800
 
 typedef struct {
     /*
@@ -61,6 +62,23 @@ typedef struct {
     int start;
     int end;
 } Range;
+
+typedef struct {
+    int frame;
+    int start;
+    int end;
+} TaskMsg;
+
+typedef struct {
+    pid_t pid;
+    int to_fd;
+    int from_fd;
+    int busy;
+} Worker;
+
+typedef struct {
+    int done;
+} EndMsg;
 
 Model *load_obj(const char *filename);
 void free_model(Model *m);
